@@ -10,13 +10,14 @@ from agents import DDPG_Agent
 
 
 env_name = 'CartPole-v0'
-random_seed = 12
+random_seed = 121
 max_episodes = 1000
 max_episode_len = 200
 render = False
 batch_size = 32
 gamma = 0.99
 epsilon = 0.1
+tau = 1e-2
 
 R=[]
 
@@ -33,7 +34,7 @@ def main():
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.n
         
-        agent = DDPG_Agent(sess, env, state_dim, 13, action_dim)
+        agent = DDPG_Agent(sess, env, state_dim, 13, action_dim, gamma, epsilon, tau)
         
         sess.run(tf.global_variables_initializer())
             

@@ -12,7 +12,7 @@ def one_hot(i, n):
     return np.eye(n)[i]
 
 class DDPG_Agent():
-    def __init__(self, sess, env, n_input, n_features, n_actions, epsilon=0.1, gamma=0.99, buffer_size=1e3):
+    def __init__(self, sess, env, n_input, n_features, n_actions, gamma=0.99, epsilon=0.1, tau=1e-3, buffer_size=1e3):
         self.sess = sess
         self.env = env
         self.n_input = n_input
@@ -20,13 +20,14 @@ class DDPG_Agent():
         self.n_actions = n_actions
         self.epsilon = epsilon
         self.gamma = gamma
+        self.tau = tau
         
         self.replay_buffer = ReplayBuffer(buffer_size)
         self.record = []
 
         self.percept = PerceptionNetwork(self.sess, self.n_input, self.n_features)
-        self.actor = ActorNetwork(self.sess, self.n_actions, self.percept)
-        self.critic = CriticNetwork(self.sess, self.n_actions, self.percept)
+        self.actor = ActorNetwork(self.sess, self.n_actions, self.percept, self.tau)
+        self.critic = CriticNetwork(self.sess, self.n_actions, self.percept, self.tau)
         
     def train(self, max_episodes, max_episode_len, batch_size, render=False):
         for i in range(max_episodes):

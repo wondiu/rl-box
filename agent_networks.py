@@ -33,6 +33,7 @@ class ActorNetwork():
             self.act_probs, self.a  = self.build_network(self.inpt)
 
             self.network_params = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='Actor')
+            self.network_params += tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='Percept')
             
             self.action_gradients = tf.placeholder(tf.float32, [None, self.n_actions])
             self.batch_size = tf.placeholder(tf.float32, None)
