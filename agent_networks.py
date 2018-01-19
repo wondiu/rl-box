@@ -6,28 +6,38 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 class PerceptionNetwork():
-    def __init__(self, sess, n_input, n_features):
+    def __init__(self, sess, n_input, n_features, layer_norm=True):
         self.sess = sess
         self.n_input = n_input
         self.n_features = n_features
+        self.layer_norm = layer_norm
 
         with tf.variable_scope('Percept'):
             self.s = tf.placeholder(tf.float32, [None, self.n_input], "state")
     
             h = self.s
-            h = layers.fully_connected(h, num_outputs=20, activation_fn=tf.nn.relu)
+#            h = layers.fully_connected(h, num_outputs=20, activation_fn=None)
+#            if self.layer_norm:
+#                h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+#            else:
+#                h = tf.nn.relu(h)
         
-            self.fs = layers.fully_connected(h, num_outputs=self.n_features, activation_fn=tf.nn.relu)
+            self.fs = layers.fully_connected(h, num_outputs=self.n_features, activation_fn=None)
+            if self.layer_norm:
+                self.fs = layers.layer_norm(self.fs, activation_fn=tf.nn.relu)
+            else:
+                self.fs = tf.nn.relu(self.fs)
 
     
 class ActorNetwork():
-    def __init__(self, sess, n_actions, action_bound, perception_net, tau=1e-3, learning_rate=1e-3):
+    def __init__(self, sess, n_actions, action_bound, perception_net, tau=1e-3, learning_rate=1e-3, layer_norm=True):
         self.sess = sess
         self.n_actions = n_actions
         self.action_bound = action_bound
         self.learning_rate = learning_rate
         self.tau = tau
         self.perception_net = perception_net
+        self.layer_norm = layer_norm
         
         with tf.variable_scope('Actor'):
             self.inpt = self.perception_net.fs
@@ -56,7 +66,12 @@ class ActorNetwork():
 
     def build_network(self, inpt):
         h = inpt
-#        h = layers.fully_connected(h, num_outputs=10, activation_fn=tf.nn.relu)
+        h = layers.fully_connected(h, num_outputs=16, activation_fn=None)
+        if self.layer_norm:
+            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+        else:
+            h = tf.nn.relu(h)
+            
         actions = layers.fully_connected(h, num_outputs=self.n_actions, activation_fn=tf.nn.tanh)
         actions = tf.multiply(actions, self.action_bound)        
         return actions
@@ -81,12 +96,13 @@ class ActorNetwork():
         self.sess.run(self.update_target_network_params)
     
 class CriticNetwork():
-    def __init__(self, sess, n_actions, perception_net, tau=1e-3, learning_rate=1e-4):
+    def __init__(self, sess, n_actions, perception_net, tau=1e-3, learning_rate=1e-4, layer_norm=True):
         self.sess = sess
         self.n_actions = n_actions
         self.tau = tau
         self.learning_rate = learning_rate
         self.perception_net = perception_net
+        self.layer_norm = layer_norm
          
         with tf.variable_scope('Critic'):
             self.actions = tf.placeholder(tf.float32, [None, self.n_actions])
@@ -115,7 +131,11 @@ class CriticNetwork():
 
     def build_network(self, inpt):
         h = self.inpt
-#        h = layers.fully_connected(h, num_outputs=10, activation_fn=tf.nn.relu)
+        h = layers.fully_connected(h, num_outputs=16, activation_fn=None)
+        if self.layer_norm:
+            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+        else:
+            h = tf.nn.relu(h)
         Q_values = layers.fully_connected(h, num_outputs=1, activation_fn=None)
         return Q_values
 

@@ -31,25 +31,27 @@ class OrnsteinUhlenbeckActionNoise():
         return 'OrnsteinUhlenbeckActionNoise(mu={}, sigma={})'.format(self.mu, self.sigma)
 
 class DDPG_Agent():
-    def __init__(self, sess, env, n_input, n_features, n_actions, action_bound,
-                 gamma=0.99, tau=1e-3, buffer_size=1e5, lr_actor=1e-4, lr_critic=1e-3):
+    def __init__(self, sess, env, n_input, n_features, n_actions, action_bound, discrete,
+                 gamma=0.99, tau=1e-3, buffer_size=1e5, lr_actor=1e-4, lr_critic=1e-3, layer_norm=False):
         self.sess = sess
         self.env = env
         self.n_input = n_input
         self.n_features = n_features
         self.n_actions = n_actions
         self.action_bound = action_bound
+        self.discrete = discrete
         self.gamma = gamma
         self.tau = tau
         self.lr_actor = lr_actor
         self.lr_critic = lr_critic
+        self.layer_norm = layer_norm
         
         self.replay_buffer = ReplayBuffer(buffer_size)
         self.record = []
 
-        self.percept = PerceptionNetwork(self.sess, self.n_input, self.n_features)
-        self.actor = ActorNetwork(self.sess, self.n_actions, self.action_bound, self.percept, self.tau, lr_actor)
-        self.critic = CriticNetwork(self.sess, self.n_actions, self.percept, self.tau, lr_critic)
+        self.percept = PerceptionNetwork(self.sess, self.n_input, self.n_features, self.layer_norm)
+        self.actor = ActorNetwork(self.sess, self.n_actions, self.action_bound, self.percept, self.tau, lr_actor, self.layer_norm)
+        self.critic = CriticNetwork(self.sess, self.n_actions, self.percept, self.tau, lr_critic, self.layer_norm)
         self.actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(self.n_actions))
         
     def train(self, max_episodes, max_episode_len, batch_size, render=False):
@@ -64,7 +66,11 @@ class DDPG_Agent():
                     self.env.render()
     
                 a = self.actor.policy([s])[0] + self.actor_noise()
-                s2, r, done, info = self.env.step(a)
+                if self.discrete:
+                    a_step = int(a>0)
+                    s2, r, done, info = self.env.step(a_step)
+                else:
+                    s2, r, done, info = self.env.step(a)
                 
                 self.replay_buffer.add( (s, a, r, done, s2) )
 
@@ -91,11 +97,12 @@ class DDPG_Agent():
 
                 s = s2
                 ep_reward += r
-    
+
                 if done:
-                    if i%10==0:
-                        print('| Reward: {:d} | Episode: {:d} | Qmax: {:.4f}'.format(int(ep_reward), \
-                                i, (ep_ave_max_q / float(j))))
-                    self.record.append(ep_reward)
                     break
+            if i%1==0:
+                print('| Reward: {:d} | Episode: {:d} | Qmax: {:.4f}'.format(int(ep_reward), \
+                        i, (ep_ave_max_q / float(j))))
+
+            self.record.append(ep_reward)
 
