@@ -1,2 +1,2 @@
-# rl-projects
-Implementation of existing and new RL ideas
+# rl-box
+Sandbox for Reinforcement Learning experimentation
