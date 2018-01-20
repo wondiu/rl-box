@@ -9,20 +9,19 @@ import gym
 from agents import DDPG_Agent
 
 
-env_name = 'Pendulum-v0'
-#env_name = 'CartPole-v0'
-random_seed = 4512
-max_episodes = 500
+#env_name = 'Pendulum-v0'
+env_name = 'CartPole-v0'
+random_seed = 864
+max_episodes = 1000
 max_episode_len = 1000
 render = False
 batch_size = 128
 gamma = 0.99
 tau = 1e-3
 layer_norm = True
+noise = {'type':'none', 'std':0.2} # type = param, OU or none
 
-Rnorm=[]
 R=[]
-
 
 def main():
     with tf.Session() as sess:
@@ -46,12 +45,11 @@ def main():
             discrete = False
            
         agent = DDPG_Agent(sess, env, state_dim, 32, action_dim, action_bounds, discrete,
-                           gamma, tau, lr_actor=1e-4, lr_critic=1e-3, layer_norm=layer_norm)
+                           gamma, tau, lr_actor=1e-4, lr_critic=1e-3, layer_norm=layer_norm, noise=noise)
         
         sess.run(tf.global_variables_initializer())
             
-
-        agent.train(max_episodes, max_episode_len, batch_size, False)
+        agent.train(max_episodes, max_episode_len, batch_size, render)
         return agent.record
 
 if __name__ == '__main__':
