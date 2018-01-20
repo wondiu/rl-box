@@ -8,7 +8,7 @@ import tensorflow.contrib.layers as layers
 
 from replay_buffer import ReplayBuffer
 from agent_networks import ActorNetwork, CriticNetwork, PreprocessingNetwork
-from noise import ParameterNoise, OrnsteinUhlenbeckActionNoise
+from noise import ParameterNoise, NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
 class DDPG_Agent():
     def __init__(self, sess, env, n_input, n_features, n_actions, action_bounds, discrete,
@@ -54,6 +54,8 @@ class DDPG_Agent():
             self.perturbed_actor.noise_vars = [tf.Variable(tf.random_normal(tf.shape(var), mean=0., stddev=1)) for var in self.perturbed_actor.pertubable_vars]
             self.perturbed_actor.update_op = self.set_perturb_update(self.actor.pertubable_vars, self.perturbed_actor.pertubable_vars, self.perturbed_actor.noise_vars)
             self.policy_distance = tf.sqrt(tf.reduce_mean(tf.square(self.actor.out - self.perturbed_actor.out)))
+        elif noise['type'] == 'norm':
+            self.action_noise = NormalActionNoise(mu=np.zeros(self.n_actions), sigma=noise['std'])
         elif noise['type'] == 'OU':
             self.action_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(self.n_actions), sigma=noise['std'])
         

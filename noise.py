@@ -16,8 +16,16 @@ class ParameterNoise():
             # Increase stddev.
             self.std *= self.adaptation_coef
             
+class NormalActionNoise():
+    def __init__(self, mu, sigma):
+        self.mu = mu
+        self.sigma = sigma
+
+    def __call__(self):
+        return np.random.normal(self.mu, self.sigma)
+            
 class OrnsteinUhlenbeckActionNoise():
-    def __init__(self, mu, sigma=0.2, theta=.15, dt=1e-2, x0=None):
+    def __init__(self, mu, sigma=0.3, theta=.15, dt=1e-2, x0=None):
         self.theta = theta
         self.mu = mu
         self.sigma = sigma
