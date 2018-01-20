@@ -74,7 +74,7 @@ class ActorNetwork(Network):
 
     def build_network(self, inpt):
         h = inpt
-        h = layers.fully_connected(h, num_outputs=16, activation_fn=None)
+        h = layers.fully_connected(h, num_outputs=32, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:
@@ -115,7 +115,7 @@ class CriticNetwork(Network):
     def build_network(self, inpt):
         self.actions = tf.placeholder(tf.float32, [None, self.n_actions])
         h = tf.concat([inpt, self.actions], 1)
-        h = layers.fully_connected(h, num_outputs=16, activation_fn=None)
+        h = layers.fully_connected(h, num_outputs=32, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:

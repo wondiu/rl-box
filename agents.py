@@ -10,11 +10,6 @@ from replay_buffer import ReplayBuffer
 from agent_networks import ActorNetwork, CriticNetwork, PreprocessingNetwork
 
 
-def copy_network(net, name):
-    copied_net = copy(net)
-    copied_net.name = name
-    return copied_net
-
 # Taken from https://github.com/openai/baselines/blob/master/baselines/ddpg/noise.py
 class OrnsteinUhlenbeckActionNoise():
     def __init__(self, mu, sigma=0.3, theta=.15, dt=1e-2, x0=None):
@@ -55,31 +50,38 @@ class DDPG_Agent():
         
         self.replay_buffer = ReplayBuffer(buffer_size)
         self.record = []
+        
+        self.tau_ph = tf.placeholder(tf.float32, None)
 
         self.preprocess = PreprocessingNetwork(self.sess, 'Preprocess', self.n_input, self.n_features, self.layer_norm)
-        self.target_preprocess = copy_network(self.preprocess, 'TargetPreprocess')
-        self.target_preprocess.update_op = self.set_target_update(self.preprocess.vars, self.target_preprocess.vars, self.tau)
-        
+        self.target_preprocess = PreprocessingNetwork(self.sess, 'TargetPreprocess', self.n_input, self.n_features, self.layer_norm)
+        self.target_preprocess.update_op = self.set_target_update(self.preprocess.vars, self.target_preprocess.vars)
         
         self.actor = ActorNetwork(self.sess, 'Actor', self.n_actions, None, self.preprocess, self.lr_actor, self.layer_norm)
-        self.target_actor = copy_network(self.actor, 'TargetActor')
-        self.target_actor.update_op = self.set_target_update(self.actor.vars, self.target_actor.vars, self.tau)
-
+        self.target_actor = ActorNetwork(self.sess, 'TargetActor', self.n_actions, None, self.target_preprocess, self.lr_actor, self.layer_norm)
+        self.target_actor.update_op = self.set_target_update(self.actor.vars, self.target_actor.vars)
 
         self.critic = CriticNetwork(self.sess, 'Critic', self.n_actions, None, self.preprocess, self.lr_critic, self.layer_norm)
-        self.target_critic = copy_network(self.critic, 'TargetCritic')
-        self.target_critic.update_op = self.set_target_update(self.critic.vars, self.target_critic.vars, self.tau)
+        self.target_critic = CriticNetwork(self.sess, 'TargetCritic', self.n_actions, None, self.target_preprocess, self.lr_critic, self.layer_norm)
+        self.target_critic.update_op = self.set_target_update(self.critic.vars, self.target_critic.vars)
 
         self.actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(self.n_actions))
         
-    def set_target_update(self, orig_vars, target_vars, tau):
+    def set_target_update(self, orig_vars, target_vars):
         return tf.group(*[target_vars[i].assign(
-                    tf.multiply(orig_vars[i], self.tau) + tf.multiply(target_vars[i], 1. - self.tau))
+                    tf.multiply(orig_vars[i], self.tau_ph) + tf.multiply(target_vars[i], 1. - self.tau_ph))
                     for i in range(len(target_vars))])
 
-    def update_target_network(self, target_network):
-        self.sess.run(target_network.update_op)
-
+    def update_target_net(self, target_network, tau):
+        self.sess.run(target_network.update_op, feed_dict={
+             self.tau_ph: tau,
+        })
+    
+    def update_target_nets(self, tau):
+        self.update_target_net(self.target_preprocess, tau)
+        self.update_target_net(self.target_actor, tau)
+        self.update_target_net(self.target_critic, tau)
+       
     
     def actionnable(self, a):
         if self.discrete:
@@ -89,6 +91,8 @@ class DDPG_Agent():
 
         
     def train(self, max_episodes, max_episode_len, batch_size, render=False):
+        # Hard updates for initialisation
+        self.update_target_nets(1)
         for i in range(max_episodes):    
             s = self.env.reset()
     
@@ -115,17 +119,13 @@ class DDPG_Agent():
                             ys.append(r_batch[k])
                         else:
                             ys.append(r_batch[k] + self.gamma * Q_targets[k])
-        
-                    Q_values, _ = self.critic.train(s_batch, a_batch, np.reshape(ys, (-1, 1)))
-                    ep_ave_max_q += np.amax(Q_values)
-        
+                    ys = np.reshape(ys, (-1, 1))
+                    Q_values, _ = self.critic.train(s_batch, a_batch, ys)
                     a_gradients = self.critic.action_gradients(s_batch, self.actor.policy(s_batch))
                     
                     self.actor.train(s_batch, a_gradients[0], batch_size)
         
-                    self.update_target_network(self.target_preprocess)
-                    self.update_target_network(self.target_actor)
-                    self.update_target_network(self.target_critic)
+                    self.update_target_nets(self.tau)
 
                 s = s2
                 ep_reward += r
@@ -133,8 +133,7 @@ class DDPG_Agent():
                 if done:
                     break
             if i%1==0:
-                print('| Reward: {:d} | Episode: {:d} | Qmax: {:.4f}'.format(int(ep_reward), \
-                        i, (ep_ave_max_q / float(j))))
+                print('| Episode: {:d} | Reward: {:d}   |'.format(i, int(ep_reward)))
 
             self.record.append(ep_reward)
 
