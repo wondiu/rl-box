@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from copy import copy
+from collections import deque
 import numpy as np
 import random
 import tensorflow as tf
@@ -11,16 +11,16 @@ from agent_networks import ActorNetwork, CriticNetwork, PreprocessingNetwork
 from noise import ParameterNoise, NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
 class DDPG_Agent():
-    def __init__(self, sess, env, n_input, n_features, n_actions, action_bounds, discrete,
+    def __init__(self, sess, env, state_dim, n_features, n_actions, action_bounds, actionnable,
                  gamma=0.99, tau=1e-3, buffer_size=1e5, lr_actor=1e-4, lr_critic=1e-3,
                  layer_norm=True, noise={'type':'param', 'std':0.2}):
         self.sess = sess
         self.env = env
-        self.n_input = n_input
+        self.state_dim = state_dim
         self.n_features = n_features
         self.n_actions = n_actions
         self.action_bounds = action_bounds
-        self.discrete = discrete
+        self.actionnable = actionnable
         self.gamma = gamma
         self.tau = tau
         self.lr_actor = lr_actor
@@ -33,8 +33,8 @@ class DDPG_Agent():
         
         self.tau_ph = tf.placeholder(tf.float32, None)
 
-        self.preprocess = PreprocessingNetwork(self.sess, 'Preprocess', self.n_input, self.n_features, self.layer_norm)
-        self.target_preprocess = PreprocessingNetwork(self.sess, 'TargetPreprocess', self.n_input, self.n_features, self.layer_norm)
+        self.preprocess = PreprocessingNetwork(self.sess, 'Preprocess', self.state_dim, self.n_features, self.layer_norm)
+        self.target_preprocess = PreprocessingNetwork(self.sess, 'TargetPreprocess', self.state_dim, self.n_features, self.layer_norm)
         self.target_preprocess.update_op = self.set_target_update(self.preprocess.vars, self.target_preprocess.vars)
         
         self.actor = ActorNetwork(self.sess, 'Actor', self.n_actions, None, self.preprocess, self.lr_actor, self.layer_norm)
@@ -93,21 +93,18 @@ class DDPG_Agent():
                 self.actor.inpt: inpt,
                 self.perturbed_actor.inpt: inpt
         })
-    
-    def actionnable(self, a):
-        if self.discrete:
-            return np.array([int(a_i<0) for a_i in a])[0] #HACK
-        else:
-            return a*self.action_bounds
         
-    def train(self, max_episodes, max_episode_len, batch_size, render=False):
+    def train(self, max_episodes, max_episode_len, batch_size, learning_freq=1, render=False):
         # Hard updates for initialisation
         self.update_target_nets(1)
-        for i in range(max_episodes):    
+        ep_rewards = deque(maxlen = 100)
+        total_iters = 0
+        for i in range(max_episodes):
             s = self.env.reset()
-    
-            ep_reward = 0    
+            
+            ep_reward = 0
             for j in range(max_episode_len):
+                total_iters += 1
                 if render:
                     self.env.render()
                 if self.param_noise is not None:
@@ -115,6 +112,7 @@ class DDPG_Agent():
                     a = self.perturbed_actor.policy([s])[0]
                 elif self.action_noise is not None:
                     a = self.actor.policy([s])[0] + self.action_noise()
+                    a = [max(-1, min(1, a_i)) for a_i in a]
                 else:
                     a = self.actor.policy([s])[0]
 
@@ -122,7 +120,7 @@ class DDPG_Agent():
                 
                 self.replay_buffer.add( (s, a, r, done, s2) )
 
-                if self.replay_buffer.size() > batch_size:
+                if self.replay_buffer.size() > batch_size and j%learning_freq==0:
                     s_batch, a_batch, r_batch, done_batch, s2_batch = self.replay_buffer.sample_batch(batch_size)
                     
                     Q_targets = self.target_critic.compute_Q(s2_batch, self.target_actor.policy(s2_batch))
@@ -147,8 +145,10 @@ class DDPG_Agent():
 
                 if done:
                     break
+            ep_rewards.append(ep_reward)
             if i%1==0:
-                print('| Episode: {:d} | Reward: {:d}   |'.format(i, int(ep_reward)))
+                print('| Episode: {:d} | Length: {:d} | Reward: {:d} | Running: {:f} | '.format(i, j, int(ep_reward), np.mean(ep_rewards))+str(a))
 
-            self.record.append(ep_reward)
+            self.record.append(np.mean(ep_rewards))
+        print(total_iters)
 
