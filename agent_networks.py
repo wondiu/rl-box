@@ -37,21 +37,21 @@ class PreprocessingNetwork(Network):
                        
     def build_network(self, inpt):
         h = inpt
-        h = layers.convolution2d(h, num_outputs=32, kernel_size=8, stride=4, activation_fn=None)
-        if self.layer_norm:
-            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
-        else:
-            h = tf.nn.relu(h)
-        h = layers.convolution2d(h, num_outputs=64, kernel_size=4, stride=2, activation_fn=None)
-        if self.layer_norm:
-            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
-        else:
-            h = tf.nn.relu(h)
-        h = layers.convolution2d(h, num_outputs=64, kernel_size=3, stride=1, activation_fn=None)
-        if self.layer_norm:
-            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
-        else:
-            h = tf.nn.relu(h)
+#        h = layers.convolution2d(h, num_outputs=32, kernel_size=8, stride=4, activation_fn=None)
+#        if self.layer_norm:
+#            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+#        else:
+#            h = tf.nn.relu(h)
+#        h = layers.convolution2d(h, num_outputs=64, kernel_size=4, stride=2, activation_fn=None)
+#        if self.layer_norm:
+#            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+#        else:
+#            h = tf.nn.relu(h)
+#        h = layers.convolution2d(h, num_outputs=64, kernel_size=3, stride=1, activation_fn=None)
+#        if self.layer_norm:
+#            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+#        else:
+#            h = tf.nn.relu(h)
         fs = layers.fully_connected(h, num_outputs=self.n_features, activation_fn=None)
         if self.layer_norm:
             fs = layers.layer_norm(fs, activation_fn=tf.nn.relu)
@@ -81,7 +81,7 @@ class ActorNetwork(Network):
 
     def build_network(self, inpt):
         h = inpt
-        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+        h = layers.fully_connected(h, num_outputs=32, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:
@@ -122,7 +122,7 @@ class CriticNetwork(Network):
     def build_network(self, inpt):
         self.actions = tf.placeholder(tf.float32, [None, self.n_actions])
         h = tf.concat([inpt, self.actions], 1)
-        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+        h = layers.fully_connected(h, num_outputs=32, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:

@@ -11,7 +11,7 @@ from agent_networks import ActorNetwork, CriticNetwork, PreprocessingNetwork
 from noise import ParameterNoise, NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
 class DDPG_Agent():
-    def __init__(self, sess, env, state_dim, n_features, n_actions, action_bounds, actionnable,
+    def __init__(self, sess, env, state_dim, n_features, n_actions, actionnable,
                  gamma=0.99, tau=1e-3, buffer_size=1e5, lr_actor=1e-4, lr_critic=1e-3,
                  layer_norm=True, noise={'type':'param', 'std':0.2}):
         self.sess = sess
@@ -19,7 +19,6 @@ class DDPG_Agent():
         self.state_dim = state_dim
         self.n_features = n_features
         self.n_actions = n_actions
-        self.action_bounds = action_bounds
         self.actionnable = actionnable
         self.gamma = gamma
         self.tau = tau
@@ -99,7 +98,7 @@ class DDPG_Agent():
         self.update_target_nets(1)
         ep_rewards = deque(maxlen = 100)
         total_iters = 0
-        for i in range(max_episodes):
+        for i in range(1, max_episodes+1):
             s = self.env.reset()
             
             ep_reward = 0
@@ -148,7 +147,7 @@ class DDPG_Agent():
             ep_rewards.append(ep_reward)
             if i%1==0:
                 print('| Episode: {:d} | Length: {:d} | Reward: {:d} | Running: {:f} | '.format(i, j, int(ep_reward), np.mean(ep_rewards))+str(a))
-
+            render=np.mean(ep_rewards)>0
             self.record.append(np.mean(ep_rewards))
         print(total_iters)
 

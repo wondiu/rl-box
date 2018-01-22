@@ -9,28 +9,20 @@ import time
 from agents import DDPG_Agent
 from wrappers import make_atari, wrap_deepmind
 
-def actionnable(a):
-    if discrete:
-        return np.array([int(a_i<0) for a_i in a])[0] #HACK
-    else:
-        return a*self.action_bounds
-
-def actionnable_breakout(a):
-    return np.array([int(a_i<0)+2 for a_i in a])[0] # DOUBLE HACK
-
-
-envs = ['Pendulum-v0', 'CartPole-v0', 'BreakoutNoFrameskip-v4', 'SpaceInvadersNoFrameskip-v4']
-env_name = envs[2]
-random_seed = 124
+discrete_envs = ['CartPole-v0']
+continuous_envs = ['Pendulum-v0', 'LunarLanderContinuous-v2', 'BipedalWalker-v2']
+atari4_envs =['BreakoutNoFrameskip-v4']
+env_name = continuous_envs[2]
+random_seed = 248
 max_episodes = 10000
-max_episode_len = 10000
+max_episode_len = 1000
 render = False
-batch_size = 32
-learning_freq = 4
+batch_size = 64
+learning_freq = 1
 gamma = 0.99
 tau = 1e-3
 layer_norm = True
-noise = {'type':'param', 'std':0.5} # type = param, norm, OU or none
+noise = {'type':'param', 'std':0.1} # type = param, norm, OU or none
 
 R=[]
 
@@ -38,23 +30,27 @@ def main():
     with tf.Session() as sess:
 
         
-        if env_name == 'CartPole-v0':
+        if env_name in discrete_envs:
             env = gym.make(env_name)
-            state_dim = env.observation_space.shape[0]
+            state_dim = env.observation_space.shape
             action_dim = 1
-            action_bounds = [1]
-        elif env_name == 'Pendulum-v0':
+            def actionnable(a):
+                return np.array([int(a_i<0) for a_i in a])[0] #HACK
+        elif env_name in continuous_envs:
             env = gym.make(env_name)
-            state_dim = env.observation_space.shape[0]
+            state_dim = env.observation_space.shape
             action_dim = env.action_space.shape[0]
             action_bounds = env.action_space.high
-            assert (env.action_space.high == -env.action_space.low)
-        elif env_name == 'BreakoutNoFrameskip-v4':
+            def actionnable(a):
+                return a*action_bounds
+        elif env_name in atari4_envs:
             env = wrap_deepmind(make_atari(env_name), episode_life=True, clip_rewards=True, frame_stack=True)
             state_dim = env.observation_space.shape
             action_dim = 1 #env.action_space.n
             print(env.unwrapped.get_action_meanings())
             action_bounds = [1]         
+            def actionnable(a):
+                return np.array([int(a_i<0)+2 for a_i in a])[0] # DOUBLE HACK
             
         np.random.seed(random_seed)
         tf.set_random_seed(random_seed)
@@ -62,7 +58,7 @@ def main():
         env.seed(random_seed)
 
            
-        agent = DDPG_Agent(sess, env, state_dim, 128, action_dim, action_bounds, actionnable_breakout,
+        agent = DDPG_Agent(sess, env, state_dim, 32, action_dim, actionnable,
                            gamma, tau, lr_actor=1e-4, lr_critic=1e-3, layer_norm=layer_norm,
                            noise=noise)
         
