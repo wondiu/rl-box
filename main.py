@@ -5,6 +5,7 @@ import random
 import tensorflow as tf
 import gym
 import time
+import matplotlib.pyplot as plt
 
 from agents import DDPG_Agent
 from wrappers import make_atari, wrap_deepmind
@@ -12,24 +13,23 @@ from wrappers import make_atari, wrap_deepmind
 discrete_envs = ['CartPole-v0']
 continuous_envs = ['Pendulum-v0', 'LunarLanderContinuous-v2', 'BipedalWalker-v2']
 atari4_envs =['BreakoutNoFrameskip-v4']
-env_name = continuous_envs[2]
-random_seed = 248
-max_episodes = 10000
-max_episode_len = 1000
+env_name = continuous_envs[1]
+random_seed = 121354
+max_episodes = 500
+max_episode_len = 1005
+
 render = False
-batch_size = 64
+batch_size = 32
 learning_freq = 1
 gamma = 0.99
 tau = 1e-3
 layer_norm = True
-noise = {'type':'param', 'std':0.1} # type = param, norm, OU or none
+noise = {'norm':None, 'OU':None, 'param':None}
 
 R=[]
 
 def main():
     with tf.Session() as sess:
-
-        
         if env_name in discrete_envs:
             env = gym.make(env_name)
             state_dim = env.observation_space.shape
@@ -58,7 +58,7 @@ def main():
         env.seed(random_seed)
 
            
-        agent = DDPG_Agent(sess, env, state_dim, 32, action_dim, actionnable,
+        agent = DDPG_Agent(sess, env, state_dim, 64, action_dim, actionnable,
                            gamma, tau, lr_actor=1e-4, lr_critic=1e-3, layer_norm=layer_norm,
                            noise=noise)
         
@@ -73,6 +73,6 @@ if __name__ == '__main__':
     
     tf.reset_default_graph()
     t0 = time.time()
-    R=main()
+    R =main()
     print(time.time()-t0)
 

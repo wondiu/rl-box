@@ -9,15 +9,16 @@ class Network():
     def __init__(self, sess, name, inpt_shape, inpt_network=None):
         self.sess = sess
         self.name = name
-        if inpt_shape is not None:
-            self.inpt_shape = (None,) + inpt_shape
+
         self.inpt_network = inpt_network
 
         with tf.variable_scope(self.name):
             if self.inpt_network is None:
-                self.inpt = tf.placeholder(tf.float32, self.inpt_shape)
+                self.inpt_shape = inpt_shape
+                self.inpt = tf.placeholder(tf.float32, (None,)+self.inpt_shape)
                 self.out = self.build_network(self.inpt)
             else:
+                self.inpt_shape = self.inpt_network.inpt.shape
                 self.inpt = self.inpt_network.inpt
                 self.out = self.build_network(self.inpt_network.out)
             
@@ -52,6 +53,11 @@ class PreprocessingNetwork(Network):
 #            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
 #        else:
 #            h = tf.nn.relu(h)
+        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+        if self.layer_norm:
+            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+        else:
+            h = tf.nn.relu(h)
         fs = layers.fully_connected(h, num_outputs=self.n_features, activation_fn=None)
         if self.layer_norm:
             fs = layers.layer_norm(fs, activation_fn=tf.nn.relu)
@@ -60,7 +66,7 @@ class PreprocessingNetwork(Network):
         return layers.flatten(fs)
     
 class ActorNetwork(Network):
-    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, learning_rate=1e-3, layer_norm=True):
+    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, learning_rate=1e-4, layer_norm=True):
         self.n_actions = n_actions
         self.learning_rate = learning_rate
         self.layer_norm = layer_norm
@@ -81,7 +87,7 @@ class ActorNetwork(Network):
 
     def build_network(self, inpt):
         h = inpt
-        h = layers.fully_connected(h, num_outputs=32, activation_fn=None)
+        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:
@@ -105,7 +111,7 @@ class ActorNetwork(Network):
         })
     
 class CriticNetwork(Network):
-    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, learning_rate=1e-4, layer_norm=True):
+    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, learning_rate=1e-3, layer_norm=True):
         self.sess = sess
         self.n_actions = n_actions
         self.learning_rate = learning_rate
@@ -121,8 +127,15 @@ class CriticNetwork(Network):
 
     def build_network(self, inpt):
         self.actions = tf.placeholder(tf.float32, [None, self.n_actions])
-        h = tf.concat([inpt, self.actions], 1)
-        h = layers.fully_connected(h, num_outputs=32, activation_fn=None)
+        h_a = self.actions
+#        h_a = layers.fully_connected(h_a, num_outputs=32, activation_fn=None)
+#        if self.layer_norm:
+#            h_a = layers.layer_norm(h_a, activation_fn=tf.nn.relu)
+#        else:
+#            h_a = tf.nn.relu(h_a)
+        h = tf.concat([inpt, h_a], 1)
+#        h = tf.add(inpt, h_a)
+        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:
@@ -131,7 +144,7 @@ class CriticNetwork(Network):
         return Q_values
 
     def train(self, inpt, actions, ys):
-        return self.sess.run([self.out, self.optimize], feed_dict={
+        return self.sess.run([self.out, self.loss, self.optimize], feed_dict={
             self.inpt: inpt,
             self.actions: actions,
             self.ys: ys
@@ -145,6 +158,57 @@ class CriticNetwork(Network):
 
     def action_gradients(self, inpt, actions):
         return self.sess.run(self.a_gradients, feed_dict={
+            self.inpt: inpt,
+            self.actions: actions
+        })
+    
+class PredictionNetwork(Network):
+    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, n_output,
+                 learning_rate=1e-4, layer_norm=True, classifier=False):
+        self.sess = sess
+        self.n_actions = n_actions
+        self.n_output = n_output
+        self.learning_rate = learning_rate
+        self.layer_norm = layer_norm
+        self.classifier = classifier
+        super().__init__(sess=sess, name=name, inpt_shape=inpt_shape, inpt_network=inpt_network)
+         
+        with tf.variable_scope(self.name):            
+            self.ys = tf.placeholder(tf.float32, [None, self.n_output])
+            if self.classifier:
+                self.loss = tf.losses.sigmoid_cross_entropy(self.ys, self.out)
+            else:
+                self.loss = tf.losses.mean_squared_error(self.ys, self.out)
+            self.trainer = tf.train.AdamOptimizer(self.learning_rate)
+            self.optimize = self.trainer.minimize(self.loss)
+
+    def build_network(self, inpt):
+        self.actions = tf.placeholder(tf.float32, [None, self.n_actions])
+        h_a = self.actions
+#        h_a = layers.fully_connected(h_a, num_outputs=32, activation_fn=None)
+#        if self.layer_norm:
+#            h_a = layers.layer_norm(h_a, activation_fn=tf.nn.relu)
+#        else:
+#            h_a = tf.nn.relu(h_a)
+        h = tf.concat([inpt, h_a], 1)
+#        h = tf.add(inpt, h_a)
+        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+        if self.layer_norm:
+            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+        else:
+            h = tf.nn.relu(h)
+        pred = layers.fully_connected(h, num_outputs=self.n_output, activation_fn=None)
+        return pred
+
+    def train(self, inpt, actions, ys):
+        return self.sess.run([self.loss, self.optimize], feed_dict={
+            self.inpt: inpt,
+            self.actions: actions,
+            self.ys: ys
+        })
+
+    def predict(self, inpt, actions):
+        return self.sess.run(self.out, feed_dict={
             self.inpt: inpt,
             self.actions: actions
         })

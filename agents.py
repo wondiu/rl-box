@@ -7,7 +7,7 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 from replay_buffer import ReplayBuffer
-from agent_networks import ActorNetwork, CriticNetwork, PreprocessingNetwork
+from agent_networks import ActorNetwork, CriticNetwork, PreprocessingNetwork, PredictionNetwork
 from noise import ParameterNoise, NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
 class DDPG_Agent():
@@ -17,6 +17,7 @@ class DDPG_Agent():
         self.sess = sess
         self.env = env
         self.state_dim = state_dim
+        self.n_input = int(np.prod(state_dim))
         self.n_features = n_features
         self.n_actions = n_actions
         self.actionnable = actionnable
@@ -46,18 +47,30 @@ class DDPG_Agent():
 
         self.action_noise = None
         self.param_noise = None
-        if noise['type'] == 'param':
-            self.param_noise = ParameterNoise(target_policy_std=noise['std'])
+        if noise['param'] is not None:
+            self.param_noise = ParameterNoise(target_policy_std=noise['param'])
             self.param_noise_std_ph = tf.placeholder(tf.float32, ())
             self.perturbed_actor = ActorNetwork(self.sess, 'PerturbedActor', self.n_actions, None, self.preprocess, self.lr_actor, self.layer_norm)
             self.perturbed_actor.noise_vars = [tf.Variable(tf.random_normal(tf.shape(var), mean=0., stddev=1)) for var in self.perturbed_actor.pertubable_vars]
             self.perturbed_actor.update_op = self.set_perturb_update(self.actor.pertubable_vars, self.perturbed_actor.pertubable_vars, self.perturbed_actor.noise_vars)
             self.policy_distance = tf.sqrt(tf.reduce_mean(tf.square(self.actor.out - self.perturbed_actor.out)))
-        elif noise['type'] == 'norm':
-            self.action_noise = NormalActionNoise(mu=np.zeros(self.n_actions), sigma=noise['std'])
-        elif noise['type'] == 'OU':
-            self.action_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(self.n_actions), sigma=noise['std'])
-        
+        if noise['norm'] is not None:
+            self.action_noise = NormalActionNoise(mu=np.zeros(self.n_actions), sigma=noise['norm'])
+        elif noise['OU'] is not None:
+            self.action_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(self.n_actions), sigma=noise['OU'])
+            
+        # state prediction task
+        self.state_pred_task = PredictionNetwork(self.sess, 'StatePrediction', 
+                                                 self.n_actions, None, self.preprocess,
+                                                 self.n_input, learning_rate=1e-4, layer_norm=self.layer_norm)
+        self.reward_pred_task = PredictionNetwork(self.sess, 'RewardPrediction', 
+                                                 self.n_actions, None, self.preprocess,
+                                                 1, learning_rate=1e-4, layer_norm=self.layer_norm)
+        self.end_pred_task = PredictionNetwork(self.sess, 'EndPrediction', 
+                                                 self.n_actions, None, self.preprocess,
+                                                 1, learning_rate=1e-4, layer_norm=self.layer_norm,
+                                                 classifier=True)
+
     def test(self):
         return self.sess.run(self.perturbation)
     
@@ -97,6 +110,7 @@ class DDPG_Agent():
         # Hard updates for initialisation
         self.update_target_nets(1)
         ep_rewards = deque(maxlen = 100)
+        L, L_aux, L_aux2 = [], [], []
         total_iters = 0
         for i in range(1, max_episodes+1):
             s = self.env.reset()
@@ -130,7 +144,7 @@ class DDPG_Agent():
                         else:
                             ys.append(r_batch[k] + self.gamma * Q_targets[k])
                     ys = np.reshape(ys, (-1, 1))
-                    Q_values, _ = self.critic.train(s_batch, a_batch, ys)
+                    Q_values, loss, _ = self.critic.train(s_batch, a_batch, ys)
                     a_gradients = self.critic.action_gradients(s_batch, self.actor.policy(s_batch))
                     self.actor.train(s_batch, a_gradients[0], batch_size)
         
@@ -139,6 +153,13 @@ class DDPG_Agent():
                     if self.param_noise is not None:
                         self.param_noise.adapt(self.compute_policy_distance(s_batch))
                         
+                    # Auxiliary tasks (state prediction, ...)
+#                    aux_loss, _ = self.state_pred_task.train(s_batch, a_batch, s2_batch)
+#                    aux_loss2, _ = self.reward_pred_task.train(s_batch, a_batch,
+#                                                               np.reshape(r_batch, (-1, 1)))
+                    aux_loss3, _ = self.end_pred_task.train(s_batch, a_batch,
+                                                               np.reshape(done_batch, (-1, 1)).astype(float))
+                        
                 s = s2
                 ep_reward += r
 
@@ -146,8 +167,8 @@ class DDPG_Agent():
                     break
             ep_rewards.append(ep_reward)
             if i%1==0:
-                print('| Episode: {:d} | Length: {:d} | Reward: {:d} | Running: {:f} | '.format(i, j, int(ep_reward), np.mean(ep_rewards))+str(a))
-            render=np.mean(ep_rewards)>0
+                print('| Ep: {:d} | L: {:d} | R: {:d} | AVG: {:f} |'.format(i, j+1, int(ep_reward), np.mean(ep_rewards)))
+#            render=np.mean(ep_rewards)>0 or i%20==0
             self.record.append(np.mean(ep_rewards))
         print(total_iters)
 
