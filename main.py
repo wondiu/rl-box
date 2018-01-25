@@ -2,7 +2,10 @@
 
 import numpy as np
 import random
+import os
 import tensorflow as tf
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import gym
 import time
 import matplotlib.pyplot as plt
@@ -14,12 +17,12 @@ discrete_envs = ['CartPole-v0']
 continuous_envs = ['Pendulum-v0', 'LunarLanderContinuous-v2', 'BipedalWalker-v2']
 atari4_envs =['BreakoutNoFrameskip-v4']
 env_name = continuous_envs[1]
-random_seed = 121354
-max_episodes = 500
+random_seed = 54
+max_episodes = 1000
 max_episode_len = 1005
 
 render = False
-batch_size = 32
+batch_size = 256
 learning_freq = 1
 gamma = 0.99
 tau = 1e-3
@@ -27,6 +30,7 @@ layer_norm = True
 noise = {'norm':None, 'OU':None, 'param':None}
 
 R=[]
+hack = 1
 
 def main():
     with tf.Session() as sess:
@@ -59,8 +63,8 @@ def main():
 
            
         agent = DDPG_Agent(sess, env, state_dim, 64, action_dim, actionnable,
-                           gamma, tau, lr_actor=1e-4, lr_critic=1e-3, layer_norm=layer_norm,
-                           noise=noise)
+                           gamma, tau, lr_actor=3e-4, lr_critic=1e-3, layer_norm=layer_norm,
+                           noise=noise, hack=hack)
         
         sess.run(tf.global_variables_initializer())
             
@@ -70,9 +74,21 @@ def main():
         return agent.record
 
 if __name__ == '__main__':
-    
-    tf.reset_default_graph()
-    t0 = time.time()
-    R =main()
-    print(time.time()-t0)
+    for n in ({'norm':None, 'OU':None, 'param':None},):
+        noise = n
+        R_n=[]
+        t0 = time.time()
+        for i in (1, 30):
+            tf.reset_default_graph()
+            hack = i
+            r = main()
+            R_n.append(r)
+        R.append(R_n)
+        print(time.time()-t0)
 
+    for n in (0,):
+#        plt.figure()
+        for i in range(len(R[n])):
+            plt.plot(R[n][i], label=str(i))
+        plt.legend()
+    

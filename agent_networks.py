@@ -87,11 +87,11 @@ class ActorNetwork(Network):
 
     def build_network(self, inpt):
         h = inpt
-        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
-        if self.layer_norm:
-            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
-        else:
-            h = tf.nn.relu(h)
+#        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+#        if self.layer_norm:
+#            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+#        else:
+#            h = tf.nn.relu(h)
             
         actions = layers.fully_connected(h, num_outputs=self.n_actions,
                                          weights_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3),
@@ -135,7 +135,7 @@ class CriticNetwork(Network):
 #            h_a = tf.nn.relu(h_a)
         h = tf.concat([inpt, h_a], 1)
 #        h = tf.add(inpt, h_a)
-        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+        h = layers.fully_connected(h, num_outputs=128, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:
@@ -176,9 +176,9 @@ class PredictionNetwork(Network):
         with tf.variable_scope(self.name):            
             self.ys = tf.placeholder(tf.float32, [None, self.n_output])
             if self.classifier:
-                self.loss = tf.losses.sigmoid_cross_entropy(self.ys, self.out)
+                self.loss = tf.losses.sigmoid_cross_entropy(self.ys, self.out)/self.n_output
             else:
-                self.loss = tf.losses.mean_squared_error(self.ys, self.out)
+                self.loss = tf.losses.mean_squared_error(self.ys, self.out)/self.n_output
             self.trainer = tf.train.AdamOptimizer(self.learning_rate)
             self.optimize = self.trainer.minimize(self.loss)
 
@@ -192,7 +192,7 @@ class PredictionNetwork(Network):
 #            h_a = tf.nn.relu(h_a)
         h = tf.concat([inpt, h_a], 1)
 #        h = tf.add(inpt, h_a)
-        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+        h = layers.fully_connected(h, num_outputs=128, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:
