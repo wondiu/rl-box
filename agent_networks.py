@@ -53,23 +53,27 @@ class PreprocessingNetwork(Network):
 #            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
 #        else:
 #            h = tf.nn.relu(h)
-        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
-        if self.layer_norm:
-            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
-        else:
-            h = tf.nn.relu(h)
-        fs = layers.fully_connected(h, num_outputs=self.n_features, activation_fn=None)
-        if self.layer_norm:
-            fs = layers.layer_norm(fs, activation_fn=tf.nn.relu)
-        else:
-            fs = tf.nn.relu(fs)
-        return layers.flatten(fs)
+#        h = layers.fully_connected(h, num_outputs=300, activation_fn=None)
+#        if self.layer_norm:
+#            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+#        else:
+#            h = tf.nn.relu(h)
+
+#        fs = layers.fully_connected(h, num_outputs=self.n_features, activation_fn=None)
+#        if self.layer_norm:
+#            fs = layers.layer_norm(fs, activation_fn=tf.nn.relu)
+#        else:
+#            fs = tf.nn.relu(fs)
+#        return layers.flatten(fs)
+        return inpt
     
 class ActorNetwork(Network):
-    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, learning_rate=1e-4, layer_norm=True):
+    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network,
+                 learning_rate=1e-4, layer_norm=True, invert_gradients=False):
         self.n_actions = n_actions
         self.learning_rate = learning_rate
         self.layer_norm = layer_norm
+        self.invert_gradients = invert_gradients
         super().__init__(sess=sess, name=name, inpt_shape=inpt_shape, inpt_network=inpt_network)
         
         with tf.variable_scope(self.name):            
@@ -87,18 +91,27 @@ class ActorNetwork(Network):
 
     def build_network(self, inpt):
         h = inpt
-#        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
-#        if self.layer_norm:
-#            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
-#        else:
-#            h = tf.nn.relu(h)
-            
-        actions = layers.fully_connected(h, num_outputs=self.n_actions,
-                                         weights_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3),
-                                         activation_fn=tf.nn.tanh)
+        h = layers.fully_connected(h, num_outputs=300, activation_fn=None)
+        if self.layer_norm:
+            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+        else:
+            h = tf.nn.relu(h)
+        if not self.invert_gradients:
+            actions = layers.fully_connected(h, num_outputs=self.n_actions,
+                                             weights_initializer=tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3),
+                                             activation_fn=tf.nn.tanh)
+        else:
+            actions = layers.fully_connected(h, num_outputs=self.n_actions, activation_fn=None)
         return actions
            
-    def train(self, inpt, a_gradients, batch_size):
+    def train(self, inpt, a_gradients, batch_size, actions):
+        if self.invert_gradients:
+            def invert(grad, a):
+                if grad<0:
+                    return grad*(a+1)/2
+                return grad*(1-a)/2
+            for b in range(batch_size):
+                a_gradients[b] = [invert(grad, a) for (grad, a) in zip(a_gradients[b], actions[b])]
         self.sess.run(self.optimize, feed_dict={
             self.inpt: inpt,
             self.action_gradients: a_gradients,
@@ -111,7 +124,7 @@ class ActorNetwork(Network):
         })
     
 class CriticNetwork(Network):
-    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, learning_rate=1e-3, layer_norm=True):
+    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, learning_rate=1e-3, layer_norm=True, optimism=0):
         self.sess = sess
         self.n_actions = n_actions
         self.learning_rate = learning_rate
@@ -120,7 +133,11 @@ class CriticNetwork(Network):
          
         with tf.variable_scope(self.name):            
             self.ys = tf.placeholder(tf.float32, [None, 1])    
-            self.loss = tf.losses.mean_squared_error(self.ys, self.out)
+#            self.loss = tf.losses.mean_squared_error(self.ys, self.out)
+            error = self.out - self.ys
+            def aloss(a): return tf.pow(error, 2) * tf.pow(tf.sign(error) + a, 2)
+            self.loss = aloss(-optimism)
+
             self.trainer = tf.train.AdamOptimizer(self.learning_rate)
             self.optimize = self.trainer.minimize(self.loss)
             self.a_gradients = tf.gradients(self.out, self.actions)
@@ -135,7 +152,7 @@ class CriticNetwork(Network):
 #            h_a = tf.nn.relu(h_a)
         h = tf.concat([inpt, h_a], 1)
 #        h = tf.add(inpt, h_a)
-        h = layers.fully_connected(h, num_outputs=128, activation_fn=None)
+        h = layers.fully_connected(h, num_outputs=300, activation_fn=None)
         if self.layer_norm:
             h = layers.layer_norm(h, activation_fn=tf.nn.relu)
         else:
@@ -192,11 +209,11 @@ class PredictionNetwork(Network):
 #            h_a = tf.nn.relu(h_a)
         h = tf.concat([inpt, h_a], 1)
 #        h = tf.add(inpt, h_a)
-        h = layers.fully_connected(h, num_outputs=128, activation_fn=None)
-        if self.layer_norm:
-            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
-        else:
-            h = tf.nn.relu(h)
+#        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+#        if self.layer_norm:
+#            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+#        else:
+#            h = tf.nn.relu(h)
         pred = layers.fully_connected(h, num_outputs=self.n_output, activation_fn=None)
         return pred
 

@@ -3,19 +3,18 @@
 from collections import deque
 import numpy as np
 import random
+import time
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
+from PIL import Image
 
-from replay_buffer import ReplayBuffer
 from agent_networks import ActorNetwork, CriticNetwork, PreprocessingNetwork, PredictionNetwork
 from noise import ParameterNoise, NormalActionNoise, OrnsteinUhlenbeckActionNoise
 
 class DDPG_Agent():
-    def __init__(self, sess, env, state_dim, n_features, n_actions, actionnable,
-                 gamma=0.99, tau=1e-3, buffer_size=1e5, lr_actor=1e-4, lr_critic=1e-3,
-                 layer_norm=True, noise={'type':'param', 'std':0.2}, hack=1):
-        self.hack=hack
-        
+    def __init__(self, sess, env, state_dim, n_features, n_actions, actionnable, noise,
+                 gamma=0.99, tau=1e-3, lr_actor=1e-4, lr_critic=1e-3,
+                 layer_norm=True, aux_pred=False, invert_gradients=False, optimism=0):
         self.sess = sess
         self.env = env
         self.state_dim = state_dim
@@ -30,7 +29,6 @@ class DDPG_Agent():
         self.layer_norm = layer_norm
         self.param_noise_std = 1
         
-        self.replay_buffer = ReplayBuffer(buffer_size)
         self.record = []
         
         self.tau_ph = tf.placeholder(tf.float32, None)
@@ -39,11 +37,11 @@ class DDPG_Agent():
         self.target_preprocess = PreprocessingNetwork(self.sess, 'TargetPreprocess', self.state_dim, self.n_features, self.layer_norm)
         self.target_preprocess.update_op = self.set_target_update(self.preprocess.vars, self.target_preprocess.vars)
         
-        self.actor = ActorNetwork(self.sess, 'Actor', self.n_actions, None, self.preprocess, self.lr_actor, self.layer_norm)
+        self.actor = ActorNetwork(self.sess, 'Actor', self.n_actions, None, self.preprocess, self.lr_actor, self.layer_norm, invert_gradients)
         self.target_actor = ActorNetwork(self.sess, 'TargetActor', self.n_actions, None, self.target_preprocess, self.lr_actor, self.layer_norm)
         self.target_actor.update_op = self.set_target_update(self.actor.vars, self.target_actor.vars)
 
-        self.critic = CriticNetwork(self.sess, 'Critic', self.n_actions, None, self.preprocess, self.lr_critic, self.layer_norm)
+        self.critic = CriticNetwork(self.sess, 'Critic', self.n_actions, None, self.preprocess, self.lr_critic, self.layer_norm, optimism)
         self.target_critic = CriticNetwork(self.sess, 'TargetCritic', self.n_actions, None, self.target_preprocess, self.lr_critic, self.layer_norm)
         self.target_critic.update_op = self.set_target_update(self.critic.vars, self.target_critic.vars)
 
@@ -60,18 +58,22 @@ class DDPG_Agent():
             self.action_noise = NormalActionNoise(mu=np.zeros(self.n_actions), sigma=noise['norm'])
         elif noise['OU'] is not None:
             self.action_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(self.n_actions), sigma=noise['OU'])
+        self.noise_decay = noise['decay']
             
-        # state prediction task
-        self.state_pred_task = PredictionNetwork(self.sess, 'StatePrediction', 
-                                                 self.n_actions, None, self.preprocess,
-                                                 self.n_input, learning_rate=1e-4, layer_norm=self.layer_norm)
-        self.reward_pred_task = PredictionNetwork(self.sess, 'RewardPrediction', 
-                                                 self.n_actions, None, self.preprocess,
-                                                 1, learning_rate=1e-4, layer_norm=self.layer_norm)
-        self.end_pred_task = PredictionNetwork(self.sess, 'EndPrediction', 
-                                                 self.n_actions, None, self.preprocess,
-                                                 1, learning_rate=1e-4, layer_norm=self.layer_norm,
-                                                 classifier=True)
+        # prediction tasks
+        self.pred_tasks = []
+        if aux_pred:
+            self.state_pred_task = PredictionNetwork(self.sess, 'StatePrediction', 
+                                                     self.n_actions, None, self.preprocess,
+                                                     self.n_input, learning_rate=1e-4, layer_norm=self.layer_norm)
+            self.reward_pred_task = PredictionNetwork(self.sess, 'RewardPrediction', 
+                                                     self.n_actions, None, self.preprocess,
+                                                     1, learning_rate=1e-4, layer_norm=self.layer_norm)
+            self.end_pred_task = PredictionNetwork(self.sess, 'EndPrediction', 
+                                                     self.n_actions, None, self.preprocess,
+                                                     1, learning_rate=1e-4, layer_norm=self.layer_norm,
+                                                     classifier=True)
+            self.pred_tasks = [self.state_pred_task, self.reward_pred_task, self.end_pred_task]
 
     def test(self):
         return self.sess.run(self.perturbation)
@@ -107,72 +109,55 @@ class DDPG_Agent():
                 self.actor.inpt: inpt,
                 self.perturbed_actor.inpt: inpt
         })
-        
-    def train(self, max_episodes, max_episode_len, batch_size, learning_freq=1, render=False):
-        # Hard updates for initialisation
+    
+    def restart_step(self):
         self.update_target_nets(1)
-        ep_rewards = deque(maxlen = 100)
-        total_iters = 0
-        for i in range(1, max_episodes+1):
-            s = self.env.reset()
-            
-            ep_reward = 0
-            for j in range(max_episode_len):
-                total_iters += 1
-                if render:
-                    self.env.render()
-                if self.param_noise is not None:
-                    self.update_perturbed_net(self.param_noise.std)
-                    a = self.perturbed_actor.policy([s])[0]
-                elif self.action_noise is not None:
-                    a = self.actor.policy([s])[0] + self.action_noise()
-                    a = [max(-1, min(1, a_i)) for a_i in a]
-                else:
-                    a = self.actor.policy([s])[0]
-
-                s2, r, done, info = self.env.step(self.actionnable(a))
-                
-                self.replay_buffer.add( (s, a, r, done, s2) )
-
-                if self.replay_buffer.size() > batch_size and j%learning_freq==0:
-                    s_batch, a_batch, r_batch, done_batch, s2_batch = self.replay_buffer.sample_batch(batch_size)
-                    
-                    Q_targets = self.target_critic.compute_Q(s2_batch, self.target_actor.policy(s2_batch))
-                    ys = []
-                    for k in range(batch_size):
-                        if done_batch[k]:
-                            ys.append(r_batch[k])
-                        else:
-                            ys.append(r_batch[k] + self.gamma * Q_targets[k])
-                    ys = np.reshape(ys, (-1, 1))
-                    Q_values, loss, _ = self.critic.train(s_batch, a_batch, ys)
-                    a_gradients = self.critic.action_gradients(s_batch, self.actor.policy(s_batch))
-                    self.actor.train(s_batch, a_gradients[0], batch_size)
+        if self.param_noise is not None:
+            self.update_perturbed_net(self.param_noise.std)
+            self.param_noise.target_policy_std = max(0.01,
+                                                     self.param_noise.target_policy_std*self.noise_decay)
+        if self.action_noise is not None:
+            self.action_noise.sigma =max(0.01,
+                                         self.action_noise.sigma*self.noise_decay)
         
-                    self.update_target_nets(self.tau)
-                    
-                    if self.param_noise is not None:
-                        self.param_noise.adapt(self.compute_policy_distance(s_batch))
-                        
-                    # Auxiliary tasks (state prediction, ...)
-                    if self.hack%2==0: 
-                        aux_loss, _ = self.state_pred_task.train(s_batch, a_batch, s2_batch)
-                    if self.hack%3==0: 
-                        aux_loss2, _ = self.reward_pred_task.train(s_batch, a_batch,
-                                                               np.reshape(r_batch, (-1, 1)))
-                    if self.hack%5==0: 
-                        aux_loss3, _ = self.end_pred_task.train(s_batch, a_batch,
-                                                               np.reshape(done_batch, (-1, 1)).astype(float))
-                        
-                s = s2
-                ep_reward += r
+    def select_action(self, s): 
+        if self.param_noise is not None:
+            a = self.perturbed_actor.policy([s])[0]
+        else:
+            a = self.actor.policy([s])[0]
+        if self.action_noise is not None:
+            a += self.action_noise()
+        a = [max(-1, min(1, a_i)) for a_i in a]
+        if np.random.random() < 0.01:
+            a = self.env.action_space.sample()
+        return self.actionnable(a)
+        
+    def training_step(self, batch_size, replay_buffer):
+        
+        if replay_buffer.size() > batch_size:
 
-                if done:
-                    break
-            ep_rewards.append(ep_reward)
-            if i%1==0:
-                print('| Ep: {:d} | L: {:d} | R: {:d} | AVG: {:f} |'.format(i, j+1, int(ep_reward), np.mean(ep_rewards)))
-#            render=np.mean(ep_rewards)>0 or i%20==0
-            self.record.append(np.mean(ep_rewards))
-        print(total_iters)
-
+            s_batch, a_batch, r_batch, done_batch, s2_batch = replay_buffer.sample_batch(batch_size)
+            
+            Q_targets = self.target_critic.compute_Q(s2_batch, self.target_actor.policy(s2_batch))
+            ys = []
+            for k in range(batch_size):
+                if done_batch[k]:
+                    ys.append(r_batch[k])
+                else:
+                    ys.append(r_batch[k] + self.gamma * Q_targets[k])
+            ys = np.reshape(ys, (-1, 1))
+            Q_values, loss, _ = self.critic.train(s_batch, a_batch, ys)
+            new_a_batch = self.actor.policy(s_batch)
+            a_gradients = self.critic.action_gradients(s_batch, new_a_batch)
+            self.actor.train(s_batch, a_gradients[0], batch_size, new_a_batch)
+            
+#                    if total_iters%int(1/self.tau)==0:
+            self.update_target_nets(self.tau)
+            
+            if self.param_noise is not None:
+                self.param_noise.adapt(self.compute_policy_distance(s_batch))
+                
+            # Auxiliary tasks (state prediction, ...)
+            for pred_task in self.pred_tasks:
+                self.pred_task.train(s_batch, a_batch, s2_batch)
+                
