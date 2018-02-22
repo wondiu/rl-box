@@ -111,10 +111,15 @@ class MaxAndSkipEnv(gym.Wrapper):
 
         return max_frame, total_reward, done, info
 
-class ClipRewardEnv(gym.RewardWrapper):
+class SignRewardEnv(gym.RewardWrapper):
     def _reward(self, reward):
         """Bin reward to {+1, 0, -1} by its sign."""
         return np.sign(reward)
+    
+class ClipRewardEnv(gym.RewardWrapper):
+    def _reward(self, reward):
+        """Clip the reward between -1 and 1"""
+        return np.clip(reward, -1, 1)
 
 class WarpFrame(gym.ObservationWrapper):
     def __init__(self, env):

@@ -12,22 +12,22 @@ import time
 import matplotlib.pyplot as plt
 from PIL import Image
 
-from agents import DDPG_Agent
+from agents import DDPG_Agent, DQN_Agent
 from replay_buffer import ReplayBuffer, SplitBuffer
 from trainer import Trainer
-from wrappers import make_atari, wrap_deepmind
+import wrappers
 
-discrete_envs = ['CartPole-v0']
+discrete_envs = ['CartPole-v0', 'LunarLander-v2']
 continuous_envs = ['Pendulum-v0', 'LunarLanderContinuous-v2',
                    'BipedalWalker-v2', 'BipedalWalkerHardcore-v2']
 atari4_envs =['BreakoutNoFrameskip-v4']
-env_name = continuous_envs[1]
-random_seed = 41813
-max_episodes = 500000000000000000000000000000000
-max_time = 36*60
+env_name = discrete_envs[0]
+random_seed = 46811468
+max_episodes = 1000
+max_time = 60*2
 
 render = False
-batch_size = 64
+batch_size = 128
 learning_freq = 1
 gamma = 0.99
 tau = 1e-3
@@ -50,12 +50,15 @@ if cpu_only:
 else:
     config = tf.ConfigProto()
 
+replay_buffer = ReplayBuffer(buffer_size)
+
 def main():
     with tf.Session(config=config) as sess:
         if env_name in discrete_envs:
             env = gym.make(env_name)
+#            env = wrappers.ClipRewardEnv(env)
             state_dim = env.observation_space.shape
-            action_dim = 1
+            action_dim = env.action_space.n
             def actionnable(a):
                 return np.array([int(a_i<0) for a_i in a])[0] #HACK
         elif env_name in continuous_envs:
@@ -79,13 +82,14 @@ def main():
         random.seed(random_seed)
         env.seed(random_seed)
         
-        replay_buffer = ReplayBuffer(buffer_size)
-           
-        agent = DDPG_Agent(sess, env, state_dim, 400, action_dim, actionnable, noise,
-                           gamma, tau, lr_actor=1e-4, lr_critic=1e-3,
-                           layer_norm=layer_norm,
-                           aux_pred=aux_pred, invert_gradients=invert_gradients,
-                           optimism=optimism)
+#        agent = DDPG_Agent(sess, env, state_dim, 400, action_dim, actionnable, noise,
+#                           gamma, tau, lr_actor=1e-4, lr_critic=1e-3,
+#                           layer_norm=layer_norm,
+#                           aux_pred=aux_pred, invert_gradients=invert_gradients,
+#                           optimism=optimism)
+        
+        agent = DQN_Agent(sess, env, state_dim, action_dim, 
+                          gamma, tau, lr=1e-4)
         
         saver = tf.train.Saver()
         
@@ -111,11 +115,14 @@ def main():
         return R, R_avg
 
 if __name__ == '__main__':
-    tf.reset_default_graph()
-    R, R_avg = main()
-    
     plt.figure()
-    plt.grid()
-    plt.title("")
-    plt.plot(R)
-    plt.plot(R_avg)
+    for o in [0]:
+        tf.reset_default_graph()
+        optimism=o
+        R, R_avg = main()
+        
+        plt.grid()
+        plt.title("")
+        plt.plot(R, "-", label=str(o))
+        plt.legend()
+        plt.plot(R_avg)

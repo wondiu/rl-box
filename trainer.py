@@ -15,7 +15,8 @@ class Trainer():
         
     def train_online(self, max_episodes, batch_size, max_episode_len=INF, max_steps=INF,
               max_time=INF, training_freq=1, printing_freq=1, render=False):
-        # Agent is assumed to be (re)initialised.
+        # Initialize agent (target network)
+        self.agent.init_step() # Useful ???
         
         t_start = int(time.time())
         t_current = 0
@@ -41,6 +42,7 @@ class Trainer():
                     self.env.render()
                     
                 # Get action from agent and take it
+                s_noisy = np.random.normal(s, 0.01)
                 a = self.agent.select_action(s)
                 s2, r, done, info = self.env.step(a)
                 ep_reward += r
@@ -50,7 +52,6 @@ class Trainer():
                 
                 # Train the agent
                 if step%training_freq==0:
-                    self.agent.training_step(batch_size, self.replay_buffer)
                     self.agent.training_step(batch_size, self.replay_buffer)
     
             t_current = int(time.time()) - t_start
@@ -63,9 +64,9 @@ class Trainer():
                 minutes, seconds = divmod(t_current, 60)
                 hours, minutes = divmod(minutes, 60)  
                 time_string = (hours>0)*(str(hours)+'h') + (minutes>0)*(str(minutes)+'m') + str(seconds)+'s'
-                print('| {:s}:{:d} | Ep: {:d} | R: {:d} | AVG: {:f} |'.format(
+                print('| {:s}:{:d} | Ep: {:d} | R: {:d} | AVG: {:.2f} |'.format(
                         time_string, step, episode,
                         int(ep_reward), avg_reward))
-            
+         
         return ep_rewards, avg_rewards
 

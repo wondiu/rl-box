@@ -179,6 +179,50 @@ class CriticNetwork(Network):
             self.actions: actions
         })
     
+class QNetwork(Network):
+    def __init__(self, sess, name, n_actions, inpt_shape, inpt_network,
+                 learning_rate=1e-4, optimism=0):
+        self.sess = sess
+        self.n_actions = n_actions
+        self.learning_rate = learning_rate
+        super().__init__(sess=sess, name=name, inpt_shape=inpt_shape, inpt_network=inpt_network)
+         
+        with tf.variable_scope(self.name):            
+            self.ys = tf.placeholder(tf.float32, [None])
+            self.actions = tf.placeholder(tf.int32, [None])
+            self.selected_out = tf.reduce_sum(tf.multiply(self.out, tf.one_hot(self.actions, self.n_actions)), 1)
+            error = self.ys - self.selected_out
+            def aloss(a): return tf.pow(error, 2) * tf.pow(tf.sign(error) + a, 2)
+            self.loss = aloss(-optimism)
+
+            self.trainer = tf.train.AdamOptimizer(self.learning_rate)
+            self.optimize = self.trainer.minimize(self.loss)
+
+    def build_network(self, inpt):
+        h = layers.fully_connected(inpt, num_outputs=300, activation_fn=tf.nn.relu)
+        h = layers.fully_connected(h, num_outputs=300, activation_fn=tf.nn.relu)
+        out = layers.fully_connected(h, num_outputs=self.n_actions, activation_fn=None)
+        return out
+
+    def train(self, inpt, actions, ys):
+        return self.sess.run([self.loss, self.optimize], feed_dict={
+            self.inpt: inpt,
+            self.actions: actions,
+            self.ys: ys
+        })
+
+    def compute_Q(self, inpt):
+        return self.sess.run(self.out, feed_dict={
+            self.inpt: inpt
+        })
+
+    def compute_selected_Q(self, inpt, actions):
+        return self.sess.run(self.selected_out, feed_dict={
+            self.inpt: inpt,
+            self.actions: actions
+        })
+
+    
 class PredictionNetwork(Network):
     def __init__(self, sess, name, n_actions, inpt_shape, inpt_network, n_output,
                  learning_rate=1e-4, layer_norm=True, classifier=False):
@@ -209,11 +253,11 @@ class PredictionNetwork(Network):
 #            h_a = tf.nn.relu(h_a)
         h = tf.concat([inpt, h_a], 1)
 #        h = tf.add(inpt, h_a)
-#        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
-#        if self.layer_norm:
-#            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
-#        else:
-#            h = tf.nn.relu(h)
+        h = layers.fully_connected(h, num_outputs=64, activation_fn=None)
+        if self.layer_norm:
+            h = layers.layer_norm(h, activation_fn=tf.nn.relu)
+        else:
+            h = tf.nn.relu(h)
         pred = layers.fully_connected(h, num_outputs=self.n_output, activation_fn=None)
         return pred
 
