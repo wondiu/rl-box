@@ -24,7 +24,7 @@ class ReplayBuffer():
 
 
 class SplitBuffer():
-    def __init__(self, max_size, n_buffers=2, thresholds=[40]):
+    def __init__(self, max_size, n_buffers=2, thresholds=[0]):
         self.max_size = max_size
         self.n_buffers = n_buffers
         self.thresholds = thresholds

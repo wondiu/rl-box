@@ -161,16 +161,12 @@ class DDPG_Agent():
                 self.end_pred_task.train(s_batch, a_batch, np.reshape(done_batch, (-1, 1)).astype(float))
 
 class DQN_Agent():
-    def __init__(self, sess, env, state_dim, n_actions,
-                 gamma=0.99, tau=1e-3, lr=1e-4, optimism=0):
+    def __init__(self, sess, env, state_dim, n_actions, dueling=True, optimism=0):
         self.sess = sess
         self.env = env
         self.state_dim = state_dim
         self.n_input = int(np.prod(state_dim))
         self.n_actions = n_actions
-        self.gamma = gamma
-        self.tau = tau
-        self.lr = lr
         self.optimism = 0
         
         self.epsilon = 1
@@ -180,9 +176,9 @@ class DQN_Agent():
         self.tau_ph = tf.placeholder(tf.float32, None)
                     
         self.q_network = QNetwork(self.sess, 'Q-Network', self.n_actions,
-                                self.state_dim, None, learning_rate=self.lr, optimism=self.optimism)
+                                self.state_dim, None, dueling=dueling, optimism=self.optimism)
         self.target_q_network = QNetwork(self.sess, 'TargetQ-Network', self.n_actions,
-                                self.state_dim, None, learning_rate=self.lr)
+                                self.state_dim, None, dueling=dueling)
         self.target_q_network.update_op = self.set_target_update(self.q_network.vars,
                                                                  self.target_q_network.vars)
     
@@ -199,8 +195,8 @@ class DQN_Agent():
     def init_step(self):
         self.update_target_net(1)
             
-    def restart_step(self):
-        self.epsilon = max(0.1, self.epsilon-1/100)
+    def epsilon_update(self, eps):
+        self.epsilon = eps
 
     def select_action(self, s):
         if np.random.random() < self.epsilon:
@@ -209,21 +205,22 @@ class DQN_Agent():
             a = np.argmax(self.q_network.compute_Q([s])[0])           
         return a
         
-    def training_step(self, batch_size, replay_buffer):
+    def training_step(self, batch_size, replay_buffer, gamma=0.99, lr=1e-4):
         
         if replay_buffer.size() > batch_size:
 
             s_batch, a_batch, r_batch, done_batch, s2_batch = replay_buffer.sample_batch(batch_size)
             
-            Q_targets = self.target_q_network.compute_selected_Q(s2_batch, a_batch)
+            Q_targets = np.max(self.target_q_network.compute_Q(s2_batch), 1)
             ys = []
             for k in range(batch_size):
                 if done_batch[k]:
                     ys.append(r_batch[k])
                 else:
-                    ys.append(r_batch[k] + self.gamma * Q_targets[k])
-            loss, _ = self.q_network.train(s_batch, a_batch, ys)
+                    ys.append(r_batch[k] + gamma * Q_targets[k])
+#            print(self.q_network.compute_Q(s_batch)[0], ys[0])
+            error, loss, _ = self.q_network.train(s_batch, a_batch, ys, lr)
+            return loss
+
             
-#                    if total_iters%int(1/self.tau)==0:
-            self.update_target_net(self.tau)
                             

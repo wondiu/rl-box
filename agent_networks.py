@@ -181,34 +181,45 @@ class CriticNetwork(Network):
     
 class QNetwork(Network):
     def __init__(self, sess, name, n_actions, inpt_shape, inpt_network,
-                 learning_rate=1e-4, optimism=0):
+                 dueling=True, optimism=0):
         self.sess = sess
         self.n_actions = n_actions
-        self.learning_rate = learning_rate
+        self.dueling=dueling
+        self.learning_rate = tf.placeholder(tf.float32, shape=[])
         super().__init__(sess=sess, name=name, inpt_shape=inpt_shape, inpt_network=inpt_network)
          
         with tf.variable_scope(self.name):            
             self.ys = tf.placeholder(tf.float32, [None])
-            self.actions = tf.placeholder(tf.int32, [None])
+            self.actions = tf.placeholder(tf.int32, [None])                
             self.selected_out = tf.reduce_sum(tf.multiply(self.out, tf.one_hot(self.actions, self.n_actions)), 1)
-            error = self.ys - self.selected_out
-            def aloss(a): return tf.pow(error, 2) * tf.pow(tf.sign(error) + a, 2)
-            self.loss = aloss(-optimism)
+            self.error = self.ys - self.selected_out
+#            def aloss(a): return tf.pow(error, 2) * tf.pow(tf.sign(error) + a, 2)
+#            self.loss = aloss(-optimism)
+            self.loss = tf.losses.mean_squared_error(self.ys, self.selected_out)
 
             self.trainer = tf.train.AdamOptimizer(self.learning_rate)
             self.optimize = self.trainer.minimize(self.loss)
 
     def build_network(self, inpt):
-        h = layers.fully_connected(inpt, num_outputs=300, activation_fn=tf.nn.relu)
-        h = layers.fully_connected(h, num_outputs=300, activation_fn=tf.nn.relu)
-        out = layers.fully_connected(h, num_outputs=self.n_actions, activation_fn=None)
+        h = layers.fully_connected(inpt, num_outputs=64, activation_fn=tf.nn.relu)
+        h = layers.fully_connected(h, num_outputs=64, activation_fn=tf.nn.relu)
+        hidden_out = layers.fully_connected(h, num_outputs=64, activation_fn=tf.nn.relu)
+        action_scores = layers.fully_connected(hidden_out, num_outputs=self.n_actions, activation_fn=None)
+        if self.dueling:
+            state_score = layers.fully_connected(hidden_out, num_outputs=1, activation_fn=None)
+            action_scores_mean = tf.reduce_mean(action_scores, 1)
+            action_scores_centered = action_scores - tf.expand_dims(action_scores_mean, 1)
+            out = state_score + action_scores_centered
+        else:
+            out = action_scores
         return out
 
-    def train(self, inpt, actions, ys):
-        return self.sess.run([self.loss, self.optimize], feed_dict={
+    def train(self, inpt, actions, ys, learning_rate):
+        return self.sess.run([self.error, self.loss, self.optimize], feed_dict={
             self.inpt: inpt,
             self.actions: actions,
-            self.ys: ys
+            self.ys: ys,
+            self.learning_rate: learning_rate
         })
 
     def compute_Q(self, inpt):

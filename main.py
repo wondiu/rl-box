@@ -17,29 +17,32 @@ from replay_buffer import ReplayBuffer, SplitBuffer
 from trainer import Trainer
 import wrappers
 
-discrete_envs = ['CartPole-v0', 'LunarLander-v2']
-continuous_envs = ['Pendulum-v0', 'LunarLanderContinuous-v2',
+discrete_envs = ['CartPole-v0', 'MountainCar-v0', 'LunarLander-v2', 'Pong-ram-v0']
+continuous_envs = ['Pendulum-v0', 'MountainCarContinuous-v0', 'LunarLanderContinuous-v2',
                    'BipedalWalker-v2', 'BipedalWalkerHardcore-v2']
 atari4_envs =['BreakoutNoFrameskip-v4']
-env_name = discrete_envs[0]
-random_seed = 46811468
-max_episodes = 1000
-max_time = 60*2
+env_name = discrete_envs[2]
+random_seed = 1486
+max_episodes = 400
+max_time = 60*60
 
 render = False
-batch_size = 128
+batch_size = 64
+
+
 learning_freq = 1
 gamma = 0.99
 tau = 1e-3
-buffer_size = 1e5
+buffer_size = 2e5
 layer_norm = False
 invert_gradients = False
 noise = {'norm':None, 'OU':None, 'param':None, 'decay':0.99}
-
 aux_pred = False
 optimism = 0
+repeat_action = 1
+
 load = False
-save = False
+save = True
 load_dir = "./save_dir"
 save_dir = "./save_dir"
 
@@ -56,7 +59,12 @@ def main():
     with tf.Session(config=config) as sess:
         if env_name in discrete_envs:
             env = gym.make(env_name)
-#            env = wrappers.ClipRewardEnv(env)
+#            env = wrappers.NoopResetEnv(env)
+#            env = wrappers.EpisodicLifeEnv(env)
+#            env = wrappers.FireResetEnv(env)
+#            if clip:
+#                env = wrappers.ClipRewardEnv(env)
+
             state_dim = env.observation_space.shape
             action_dim = env.action_space.n
             def actionnable(a):
@@ -77,19 +85,21 @@ def main():
             def actionnable(a):
                 return np.array([int(a_i<0)+2 for a_i in a])[0] # DOUBLE HACK
             
+        print(state_dim, action_dim)
+            
         np.random.seed(random_seed)
         tf.set_random_seed(random_seed)
         random.seed(random_seed)
         env.seed(random_seed)
         
-#        agent = DDPG_Agent(sess, env, state_dim, 400, action_dim, actionnable, noise,
+#        agent = DDPG_Agent(sess, env, state_dim, 300, action_dim, actionnable, noise,
 #                           gamma, tau, lr_actor=1e-4, lr_critic=1e-3,
 #                           layer_norm=layer_norm,
 #                           aux_pred=aux_pred, invert_gradients=invert_gradients,
 #                           optimism=optimism)
         
-        agent = DQN_Agent(sess, env, state_dim, action_dim, 
-                          gamma, tau, lr=1e-4)
+        agent = DQN_Agent(sess, env, state_dim, action_dim,
+                          dueling=True, optimism=optimism)
         
         saver = tf.train.Saver()
         
@@ -101,7 +111,15 @@ def main():
         else:
             sess.run(tf.global_variables_initializer())
         
-        R, R_avg = trainer.train_online(max_episodes, batch_size, max_time=max_time, render=render)
+        random_return, goal_return = -200, 200
+        lr_schedule = lambda x:3e-4*((goal_return-x)/(goal_return-random_return))
+        eps_schedule = lambda x:((goal_return-x)/(goal_return-random_return))**2
+        R, R_avg, L = trainer.train_online(max_episodes, batch_size, max_time=max_time,
+                                        training_freq=1, repeat_action=repeat_action,
+                                        gamma=gamma, eps_schedule=None,
+                                        lr_schedule=None,
+                                        render=render)
+#        trainer.train_online(10, batch_size=1e10, max_time=max_time, render=True)
         
         env.close()
     
@@ -112,17 +130,19 @@ def main():
             save_path = saver.save(sess, ckpt_path)
             print("\nSave Model %s\n" % save_path)
 
-        return R, R_avg
+        return R, R_avg, L
 
 if __name__ == '__main__':
-    plt.figure()
-    for o in [0]:
+    for v in [0]:
         tf.reset_default_graph()
-        optimism=o
-        R, R_avg = main()
+#        clip = v
+        R, R_avg, L = main()
         
+        plt.figure()
         plt.grid()
         plt.title("")
-        plt.plot(R, "-", label=str(o))
+        plt.plot(R, ".", label=str())
         plt.legend()
         plt.plot(R_avg)
+#        plt.figure()
+#        plt.plot(L)
