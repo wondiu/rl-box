@@ -9,12 +9,14 @@ Sandbox for Reinforcement Learning experimentation
 	- Action noise: Gaussian, Ornstein–Uhlenbeck
 	- Parameter noise
 	- Layer Normalisation
+	
+- DQN (Deep Q Learning)
+	- Double DQN (Target Network)
+	- Dueling Network
 
 
 ## Experiments
 
-### "Unintentional" auxiliary prediction tasks
-
-<img src="data/LLC_ui_aux_tasks.png"/>
-
+- Auxiliary prediction tasks
+- Optimism via asymmetric loss function
 
